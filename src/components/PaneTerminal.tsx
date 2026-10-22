@@ -66,10 +66,10 @@ import { terminalLabel } from "../lib/terminalLabel.ts";
 import { useMediaQuery } from "../lib/useMediaQuery.ts";
 import { useAnnouncedText } from "../lib/useAnnouncedText.ts";
 import { modalOpen } from "../lib/focus.ts";
-import { TerminalTouch, terminalCell } from "../lib/terminalTouch.ts";
+import { TerminalTouch, TerminalTouchMomentum, terminalCell } from "../lib/terminalTouch.ts";
 import { pinchFontSize } from "../lib/pinchFontSize.ts";
 import { narrowPaneFontSize } from "../lib/narrowPaneFont.ts";
-import { finalStep, HERDR_MOUSE_SCROLL_LINES, wheelSteps } from "../lib/wheelSteps.ts";
+import { HERDR_MOUSE_SCROLL_LINES, wheelSteps } from "../lib/wheelSteps.ts";
 import { attachTerminalWheel, canPanTerminalGrid } from "../lib/terminalWheel.ts";
 import { visibleTerminalInputBounds } from "../lib/terminalViewport.ts";
 
@@ -407,6 +407,7 @@ export function PaneTerminal({
   const coarseRef = useRef(coarse); coarseRef.current = coarse;
   const [keyboardOwner, setKeyboardOwner] = useState<string | null>(null);
   const keyboardOpen = keyboardOwner === paneId && paneId !== null && active && presented && shown && !chatView;
+  const keyboardActionRef = useRef<(open: boolean) => void>(() => {});
   const keyboardOpenRef = useRef(keyboardOpen);
   keyboardOpenRef.current = keyboardOpen;
   const { settings, update: updateSettings } = useSettings();
@@ -1634,6 +1635,7 @@ export function PaneTerminal({
       setConversationPushes(socket.conversationPushes());
     });
     const offDisconnect = session.onDisconnect(() => {
+      stopCoast();
       clearModifiers();
       pendingScopeRef.current = session.scope;
       pendingEpochRef.current = session.epoch;
@@ -1906,6 +1908,13 @@ export function PaneTerminal({
     // through the API instead: there is no attach stream to carry mouse reports.
     // Two fingers pinch the font size: the font follows them locally, and the shared pty resizes once when one lifts.
     const stroke = new TerminalTouch();
+    const momentum = new TerminalTouchMomentum();
+    let coastFrame: number | null = null;
+    const stopCoast = (): void => {
+      if (coastFrame !== null) cancelAnimationFrame(coastFrame);
+      coastFrame = null;
+      momentum.reset();
+    };
     let touchX = 0;
     let touchY = 0;
     /** finger travel of this gesture not yet sent as a wheel report */
@@ -1964,6 +1973,7 @@ export function PaneTerminal({
     };
     const onTouchStart = (event: TouchEvent): void => {
       if (chatViewRef.current) return;
+      stopCoast();
       if (event.touches.length === 1 || (!tracking && !pinchStroke)) touchPane = paneRef.current;
       // Own the gesture before xterm: no implicit focus, browser click or selection on release.
       event.preventDefault();
@@ -2003,6 +2013,7 @@ export function PaneTerminal({
         touchX = first.clientX;
         touchY = first.clientY;
         stroke.begin(touchX, touchY, paneRef.current);
+        momentum.begin(performance.now());
       }
     };
     const onTouchMove = (event: TouchEvent): void => {
@@ -2058,12 +2069,32 @@ export function PaneTerminal({
         return;
       }
       if (scrollableMirror() && across !== 0) host.scrollBy(across, 0);
-      // xterm sends herdr one report per wheel event however far it went, and herdr scrolls a
-      // few lines per report: one line-mode wheel per that many rows of finger travel keeps a
-      // swipe as far as a slow drag, and the text under the finger
-      const { steps, rest } = wheelSteps(touchPixels + delta, cellHeight() * HERDR_MOUSE_SCROLL_LINES);
-      touchPixels = rest;
+      momentum.move(delta, performance.now());
+      scrollTouch(delta);
+    };
+    const scrollTouch = (delta: number): void => {
+      // Round at half a step during the drag, rather than waiting for three full rows.
+      // Keep the signed remainder so slow drags and flicks cover the same distance.
+      const step = cellHeight() * HERDR_MOUSE_SCROLL_LINES;
+      if (!(step > 0)) return;
+      const pixels = touchPixels + delta;
+      const steps = Math.sign(pixels) * Math.floor(Math.abs(pixels) / step + 0.5);
+      touchPixels = pixels - steps * step;
       sendTouchWheels(steps);
+    };
+    const canCoast = (): boolean => {
+      const current = paneRef.current;
+      return current !== null && current === touchPane && activeRef.current && presentedRef.current && shownRef.current
+        && !document.hidden && !modalOpen() && !chatViewRef.current && !observeRef.current && !heldRef.current && !endedRef.current
+        && !secretRef.current && !adopted() && socket.canInput(current);
+    };
+    const coast = (now: number): void => {
+      coastFrame = null;
+      if (!canCoast()) { stopCoast(); return; }
+      const delta = momentum.advance(now);
+      if (delta === 0) { stopCoast(); return; }
+      scrollTouch(delta);
+      coastFrame = requestAnimationFrame(coast);
     };
     /** `steps` line-mode wheel reports at the finger, each one herdr scroll step in the sign's direction */
     const sendTouchWheels = (steps: number): void => {
@@ -2103,15 +2134,19 @@ export function PaneTerminal({
         if (cell && current) {
           // A click is one ordered press/release, never a draft or a retried action.
           socket.sendInput(current, `\x1b[<0;${cell.col};${cell.row}M\x1b[<0;${cell.col};${cell.row}m`);
+          // The terminal cursor identifies the input row without parsing an agent's screen.
+          // Include its adjacent row so a small phone target is still easy to hit.
+          if (Math.abs(cell.row - (term.buffer.active.cursorY + 1)) <= 1) keyboardActionRef.current(true);
         }
       }
       stroke.cancel();
-      // a lifted one-finger drag sends what is left once it reaches half a step: a flick shorter
-      // than one step still scrolls, and a long drag loses at most half a step at its end
-      if (tracking && event.type === "touchend" && !pinchStroke && (!adopted() || scrollableMirror())) {
-        sendTouchWheels(finalStep(touchPixels, cellHeight() * HERDR_MOUSE_SCROLL_LINES));
+      if (tracking && event.type === "touchend" && !pinchStroke && !tap && canCoast()
+          && !window.matchMedia("(prefers-reduced-motion: reduce)").matches && momentum.release(performance.now())) {
+        coastFrame = requestAnimationFrame(coast);
+      } else {
+        stopCoast();
+        touchPixels = 0;
       }
-      touchPixels = 0;
       tracking = false;
       if (!pinchStroke) return;
       claimPinch(event);
@@ -2120,6 +2155,9 @@ export function PaneTerminal({
     };
     // Safari zooms inside an overflow region (xterm's viewport) despite touch-action: none
     const onGesture = (event: Event): void => { if (!chatViewRef.current) event.preventDefault(); };
+    window.addEventListener("pointerdown", stopCoast, { capture: true });
+    window.addEventListener("keydown", stopCoast, { capture: true });
+    window.addEventListener("blur", stopCoast);
     host.addEventListener("touchstart", onTouchStart, { capture: true, passive: false });
     host.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
     host.addEventListener("touchend", onTouchEnd, { capture: true, passive: false });
@@ -2371,6 +2409,10 @@ export function PaneTerminal({
       window.clearInterval(poll);
       observer.disconnect();
       if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      stopCoast();
+      window.removeEventListener("pointerdown", stopCoast, { capture: true });
+      window.removeEventListener("keydown", stopCoast, { capture: true });
+      window.removeEventListener("blur", stopCoast);
       host.removeEventListener("touchstart", onTouchStart, { capture: true });
       host.removeEventListener("touchmove", onTouchMove, { capture: true });
       host.removeEventListener("touchend", onTouchEnd, { capture: true });
@@ -2831,9 +2873,9 @@ export function PaneTerminal({
     return sent;
   }, []);
 
-  const toggleKeyboard = useCallback(() => {
+  const setKeyboardVisible = useCallback((open: boolean) => {
     if (composingRef.current || lineComposingRef.current) return;
-    const open = !keyboardOpenRef.current;
+    if (open && (!activeRef.current || !presentedRef.current || !shownRef.current || observeRef.current || heldRef.current || endedRef.current)) return;
     keyboardOpenRef.current = open;
     setKeyboardOwner(open ? paneId : null);
     const field = inputLineRef.current
@@ -2847,6 +2889,9 @@ export function PaneTerminal({
     else field.blur();
   }, [paneId]);
 
+  keyboardActionRef.current = setKeyboardVisible;
+  const toggleKeyboard = useCallback(() => setKeyboardVisible(!keyboardOpenRef.current), [setKeyboardVisible]);
+
   useLayoutEffect(() => { setKeyboardOwner(null); }, [paneId]);
 
   useLayoutEffect(() => {
@@ -2859,13 +2904,19 @@ export function PaneTerminal({
     const guardFocus = (event: FocusEvent) => {
       if (coarseRef.current && !keyboardOpenRef.current) (event.target as HTMLTextAreaElement).blur();
     };
+    const openLine = (): void => { if (coarseRef.current) keyboardActionRef.current(true); };
+    const line = stackRef.current?.querySelector<HTMLTextAreaElement>(".terminal-input-text");
+    line?.addEventListener("click", openLine);
     for (const field of fields) {
       field.readOnly = locked;
       field.inputMode = locked || (field === terminal?.textarea && inputLine) ? "none" : "text";
       if (locked && document.activeElement === field) field.blur();
       field.addEventListener("focus", guardFocus);
     }
-    return () => { for (const field of fields) field.removeEventListener("focus", guardFocus); };
+    return () => {
+      line?.removeEventListener("click", openLine);
+      for (const field of fields) field.removeEventListener("focus", guardFocus);
+    };
   }, [terminal, coarse, keyboardOpen, inputLine]);
 
   // the composer's stop button: Escape interrupts the agent's current turn in every

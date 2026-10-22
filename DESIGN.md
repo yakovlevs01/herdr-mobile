@@ -2584,9 +2584,13 @@ The phone opens the existing terminal session by default and retains Herdr's com
 workspace and agent navigation. This follows the terminal/session organization of
 [Warp's tabs and panes](https://docs.warp.dev/terminal/windows), while keeping Herdr's
 existing sidebar. Touch input uses a dedicated keyboard toggle and a service-key bar,
-informed by [Blink's smart keys](https://docs.blink.sh/). Unlike Blink's general shell
-workflow, tapping our terminal always means a TUI mouse click; opening the keyboard
-is a separate explicit action because Grill contains clickable controls and scroll regions.
+informed by [Blink's smart keys](https://github.com/blinksh/blink#using-blink).
+A tap on the terminal cursor row (with one adjacent row of touch tolerance) opens
+input synchronously, as does a tap on the optional input line. Other terminal taps
+remain mouse clicks because Grill contains clickable controls and scroll regions.
+This differs from a general shell's tap-anywhere focus to avoid raising the keyboard
+while reading. The explicit keyboard button also works when the cursor is hidden
+or the desired field is not the terminal's current input row.
 No code or artwork from either product is used.
 
 A touch stroke waits for release before sending a click. Eight CSS pixels of travel
@@ -2596,3 +2600,10 @@ region. Cancellation and multi-touch never click. Herdr's existing input lease s
 gates delivery; touch actions are neither queued nor replayed after reconnecting.
 The keyboard button stays outside the horizontally scrolling key bar. Escape, Tab,
 arrows and Enter precede modifiers in the default layout. Existing custom layouts remain.
+
+Touch scroll emits the nearest wheel step during travel, halving the previous
+first-step threshold. A recent flick coasts with exponential decay for at most
+900 ms. A new touch, key, window blur, navigation, lost input permission or hidden
+page stops coasting; reduced-motion preference disables it. The attached terminal
+still moves in Herdr's row-sized steps and waits for remote output. We do not paint
+invented scrollback or move the entire TUI as a fake local scroll animation.

@@ -20,7 +20,7 @@ async function until(check: () => boolean | Promise<boolean>, label: string): Pr
 
 /** Real phone touch events: live font and badge while pinching, one resize and saved size on release, restore on cancel. */
 export async function checkTerminalPinch(browser: Browser, origin: string, paneId: string): Promise<void> {
-  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "en-US" });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, locale: "en-US", reducedMotion: "reduce" });
   await context.addInitScript(({ paneId }) => {
     // Keep the size saved by the gesture when this same page reloads.
     if (!localStorage.getItem("herdr-web-ui:settings")) localStorage.setItem("herdr-web-ui:settings", JSON.stringify({ language: "en" }));
@@ -118,7 +118,7 @@ export async function checkTerminalPinch(browser: Browser, origin: string, paneI
     const baseline = await probe();
     assert.equal(baseline.fontPx, 13, "baseline font is 13 px");
     assert(!(await badge.isVisible()), "badge is hidden before pinching");
-    // a quick swipe scrolls as far as a slow drag over the same travel: one wheel report per three rows
+    // With reduced motion, there is no coast: fast and slow drags cover the same distance.
     const fast = await swipe(300, 2);
     const slow = await swipe(300, 30);
     const expected = 300 / (3 * baseline.cell);

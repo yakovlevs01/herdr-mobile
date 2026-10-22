@@ -103,7 +103,7 @@ try {
     return { x: rect.left + 50, y: rect.top + rect.height * 2.5 };
   });
   await page.touchscreen.tap(point.x, point.y);
-  await page.getByRole("button", { name: "Show keyboard", exact: true }).tap();
+  if (await page.getByRole("button", { name: "Show keyboard", exact: true }).count()) await page.getByRole("button", { name: "Show keyboard", exact: true }).tap();
   await page.keyboard.insertText("Тестовый вопрос");
   await page.locator('.key[data-key="Enter"]').tap();
   await page.getByRole("button", { name: "Hide keyboard", exact: true }).tap();
@@ -134,7 +134,7 @@ try {
     return { x: rect.left + 50, y: rect.top + rect.height * 2.5 };
   });
   await page.touchscreen.tap(answerPoint.x, answerPoint.y);
-  await page.getByRole("button", { name: "Show keyboard", exact: true }).tap();
+  if (await page.getByRole("button", { name: "Show keyboard", exact: true }).count()) await page.getByRole("button", { name: "Show keyboard", exact: true }).tap();
   await page.keyboard.insertText("Ответ с телефона");
   await page.locator('.key[data-key="Enter"]').tap();
   await page.getByRole("button", { name: "Hide keyboard", exact: true }).tap();
