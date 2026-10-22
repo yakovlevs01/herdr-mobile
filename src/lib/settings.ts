@@ -327,7 +327,7 @@ export const DEFAULT_SETTINGS: Settings = {
   showUsage: false,
   usageCount: "left",
   usageGlance: "session",
-  defaultView: "auto",
+  defaultView: "terminal",
   usageOrder: [],
   usageHidden: [],
   voiceInput: "auto",

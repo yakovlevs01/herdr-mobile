@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { focusTerminalInput } from "./mobile-terminal-controls.ts";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1104,16 +1105,16 @@ export async function checkFocusedWindowReclaimsTerminalSize(browser: Browser, o
       assert.ok(resized >= 0 && resized < sent, `${what}: the phone's own grid goes out before its input: ${JSON.stringify(out)}`);
       await sizeBecomes(phoneSize, what);
     };
-    // focus into the line: a tap there is the user on the phone, before a key is typed
+    // Explicitly open the phone's keyboard before typing into its input line.
     let mark = (await framesOf(phone)).length;
-    await phone.locator(".terminal-input-text").tap();
+    await focusTerminalInput(phone, phone.locator(".terminal-input-text"));
     const focusDeadline = Date.now() + 10_000;
     while (Date.now() < focusDeadline) {
       if ((await outFrom(phone, mark)).some((f) => f.type === "resize")) break;
       await Bun.sleep(50);
     }
-    assert.ok((await outFrom(phone, mark)).some((f) => f.type === "resize" && f.cols === phoneCols && f.rows === phoneRows), "a tap into the input line takes the pane back to the phone's grid");
-    await sizeBecomes(phoneSize, "a tap into the input line");
+    assert.ok((await outFrom(phone, mark)).some((f) => f.type === "resize" && f.cols === phoneCols && f.rows === phoneRows), "opening the keyboard takes the pane back to the phone's grid");
+    await sizeBecomes(phoneSize, "opening the phone keyboard");
     // the line keeps its focus from here on: no focus event helps the steps below
     await desktop.keyboard.press("Shift");
     await sizeBecomes(desktopSize, "a key in the desktop terminal, the phone's line focused");

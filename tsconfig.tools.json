@@ -4,6 +4,10 @@
     "noEmit": true
   },
   "files": [
+    "scripts/mobile-tui-regression.ts",
+    "scripts/mobile-tui-suite.ts",
+    "scripts/mobile-terminal-controls.ts",
+    "scripts/grill-mobile-regression.ts",
     "scripts/herdr-themes.ts",
     "scripts/herdr-theme-proposal.ts",
     "scripts/herdr-theme-overrides.ts",

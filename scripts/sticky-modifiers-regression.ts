@@ -1,3 +1,4 @@
+import { focusTerminalInput } from "./mobile-terminal-controls.ts";
 /** Touch controls → browser WS → Herdr's pane encoder → real raw-mode PTY. */
 import "./test-herdr.ts";
 import assert from "node:assert/strict";
@@ -63,7 +64,7 @@ try {
     // Herdr's screen stream enables bracketed paste; exercise xterm with it disabled too.
     ws!.send(JSON.stringify({ type: "pty-data", pane_id: pane, data: "\x1b[?2004l" }));
     const input = page.locator(".xterm-helper-textarea");
-    await input.focus();
+    await focusTerminalInput(page, input);
     let previousMask = 0;
     const held = async (mask: number) => {
       for (const [bit, key] of [[4, "Control"], [2, "Alt"], [1, "Shift"]] as const) {
@@ -173,7 +174,7 @@ try {
     // Hardware modifiers combine with held touch modifiers as well.
     await held(2);
     await input.evaluate((element) => { (element as HTMLTextAreaElement).value = ""; });
-    await input.focus();
+    await focusTerminalInput(page, input);
     const hardwareBefore = read();
     await input.press("Control+Shift+d");
     await until(() => read().length > hardwareBefore.length, "hardware/touch combination received");
@@ -220,9 +221,9 @@ try {
     await until(async () => !(await ctrl.isDisabled()), "typing ready after settings");
     await input.evaluate((element) => { (element as HTMLTextAreaElement).value = ""; });
     await keyBarSettings.waitFor({ state: "hidden" });
-    await input.focus();
+    await focusTerminalInput(page, input);
     await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-    await input.focus();
+    await focusTerminalInput(page, input);
     await input.press("z");
     await until(() => frames.length > plainBefore, "typing after hiding Alt");
     assert.equal(frames.at(-1).type, "input");
@@ -248,7 +249,7 @@ try {
     await refused.getByRole("button", { name: "Dismiss", exact: true }).tap({ timeout: 5_000 });
     await refused.waitFor({ state: "hidden" });
     assert.equal(await ctrl.isDisabled(), false, "a refused key leaves the pane ready for the next one");
-    await input.focus();
+    await focusTerminalInput(page, input);
     await held(7);
     // Disconnect clears all modifiers and sends no retained shortcuts on reconnect.
     await ws!.close();

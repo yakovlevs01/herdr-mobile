@@ -2577,3 +2577,22 @@ The values are the ones in `src/styles.css`.
 | Terminal content accessibility relies on xterm defaults | `PaneTerminal.tsx` | Screen-reader mode changes terminal DOM and input behavior | Decide with herdr TUI owners |
 | Drawer has no focus trap | `.sidebar.is-open` | Closed state leaves the tab order, but open-state trapping is not implemented | Add a shared focus utility |
 | Modal focus is initialized, not fully trapped | Dialog components | Escape/scrim/close work; tab containment is not shared | Add the same focus utility |
+
+## Mobile TUI fork
+
+The phone opens the existing terminal session by default and retains Herdr's computer,
+workspace and agent navigation. This follows the terminal/session organization of
+[Warp's tabs and panes](https://docs.warp.dev/terminal/windows), while keeping Herdr's
+existing sidebar. Touch input uses a dedicated keyboard toggle and a service-key bar,
+informed by [Blink's smart keys](https://docs.blink.sh/). Unlike Blink's general shell
+workflow, tapping our terminal always means a TUI mouse click; opening the keyboard
+is a separate explicit action because Grill contains clickable controls and scroll regions.
+No code or artwork from either product is used.
+
+A touch stroke waits for release before sending a click. Eight CSS pixels of travel
+turn it into a drag permanently, including if the finger returns to its origin. Wheel
+reports retain the starting cell so crossing a panel boundary cannot scroll another
+region. Cancellation and multi-touch never click. Herdr's existing input lease still
+gates delivery; touch actions are neither queued nor replayed after reconnecting.
+The keyboard button stays outside the horizontally scrolling key bar. Escape, Tab,
+arrows and Enter precede modifiers in the default layout. Existing custom layouts remain.

@@ -1,3 +1,4 @@
+import { focusTerminalInput } from "./mobile-terminal-controls.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,8 +15,8 @@ const repo = join(import.meta.dir, "..");
 const app = mkdtempSync(join(tmpdir(), "herdr-key-bar-demo-"));
 const evidence = process.env.UI_EVIDENCE_DIR;
 const SETTINGS_KEY = "herdr-web-ui:settings";
-const MIGRATED_KEYS = ["direct", "Escape", "Tab", "BackTab", "Control", "Alt", "Shift", "Enter", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "ctrl-c", "ctrl-d", "ctrl-z", "pipe", "tilde", "slash"];
-const DEFAULT_KEY_BAR_KEYS = ["direct", "Escape", "Tab", "ctrl-c", "Control", "Alt", "Shift", "Enter", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"];
+const MIGRATED_KEYS = [ "Escape", "Tab", "BackTab", "Control", "Alt", "Shift", "Enter", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown", "ctrl-c", "ctrl-d", "ctrl-z", "pipe", "tilde", "slash"];
+const DEFAULT_KEY_BAR_KEYS = ["Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Control", "Alt", "Shift", "ctrl-c"];
 
 interface InputFrame { type: "input" | "keys"; pane_id: string; text?: string; keys?: string[] }
 const framesOf = (page: Page): Promise<InputFrame[]> => page.evaluate(() => (window as unknown as { keyBarFrames: InputFrame[] }).keyBarFrames);
@@ -29,7 +30,7 @@ let capturedDetail = false;
 const ready = async (page: Page): Promise<void> => {
   await page.locator(".conn-live").waitFor({ state: "attached" });
   await page.locator(".key-bar").waitFor();
-  await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.key-bar [data-key="direct"]')?.disabled === false);
+  await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('[data-key="keyboard"]')?.disabled === false);
 };
 const openMainSettings = async (page: Page): Promise<Locator> => {
   const mac = await page.evaluate(() => /mac/i.test(navigator.platform));
@@ -210,7 +211,7 @@ try {
 
         const bar = page.locator(".key-bar");
         const input = page.locator(".xterm-helper-textarea");
-        await input.focus();
+        await focusTerminalInput(page, input);
         await bar.locator('[data-key="Control"]').tap();
         await expectFrame(page, () => bar.locator('[data-key="ArrowLeft"]').tap(), { type: "keys", keys: ["ctrl+left"] });
         await bar.locator('[data-key="Alt"]').tap();
@@ -239,9 +240,9 @@ try {
         await closeSettings(page, dialog);
         assert.equal(await bar.locator('[data-key="Alt"]').count(), 0);
         await input.evaluate((node) => { (node as HTMLTextAreaElement).value = ""; });
-        await input.focus();
+        await focusTerminalInput(page, input);
         await settled(page);
-        await input.focus();
+        await focusTerminalInput(page, input);
         await expectFrame(page, () => input.press("z"), { type: "input", text: "z" });
         dialog = await openSettings(page);
         editor = dialog.locator(".key-bar-settings");
@@ -261,14 +262,14 @@ try {
         while (await editor.locator(".key-bar-settings-row").count()) await editor.getByRole("button", { name: /^Remove / }).first().tap();
         await editor.getByText("No keys selected.", { exact: true }).waitFor();
         await closeSettings(page, dialog);
-        assert.deepEqual(await keysOf(page), ["direct"]);
+        assert.deepEqual(await keysOf(page), []);
         await page.reload();
         await ready(page);
-        assert.deepEqual(await keysOf(page), ["direct"], "an intentionally empty list survives reload");
-        await bar.locator('[data-key="direct"]').tap();
-        await page.getByRole("textbox", { name: "Terminal input line", exact: true }).waitFor();
-        await bar.locator('[data-key="direct"]').tap();
-        await page.getByRole("textbox", { name: "Terminal input line", exact: true }).waitFor({ state: "hidden" });
+        assert.deepEqual(await keysOf(page), [], "an intentionally empty list survives reload");
+        await page.getByRole("button", { name: "Show keyboard", exact: true }).tap();
+        assert.equal(await input.evaluate(node => node === document.activeElement), true);
+        await page.getByRole("button", { name: "Hide keyboard", exact: true }).tap();
+        assert.equal(await input.evaluate(node => node === document.activeElement), false);
         dialog = await openSettings(page);
         await dialog.locator(".key-bar-settings").getByRole("button", { name: "Restore defaults", exact: true }).tap();
         await closeSettings(page, dialog);
@@ -276,9 +277,9 @@ try {
         for (const width of [320, 390]) {
           await page.setViewportSize({ width, height: 844 });
           await settled(page);
-          const controlC = await page.evaluate(() => {
+          const escapeKey = await page.evaluate(() => {
             const bar = document.querySelector<HTMLElement>(".key-bar");
-            const key = bar?.querySelector<HTMLElement>('[data-key="ctrl-c"]');
+            const key = bar?.querySelector<HTMLElement>('[data-key="Escape"]');
             if (!bar || !key) return null;
             bar.scrollLeft = 0;
             const barRect = bar.getBoundingClientRect();
@@ -290,7 +291,7 @@ try {
               scrollLeft: bar.scrollLeft,
             };
           });
-          assert.deepEqual(controlC, { visibleAtStart: true, scrollLeft: 0 }, `Ctrl+C is visible without horizontal scrolling at ${width}px`);
+          assert.deepEqual(escapeKey, { visibleAtStart: true, scrollLeft: 0 }, `Escape is visible without horizontal scrolling at ${width}px`);
           if (evidence && width === 390) {
             mkdirSync(evidence, { recursive: true });
             await appFaces(page);
@@ -412,7 +413,7 @@ try {
         await closePalette();
 
         const dispatchPhysicalK = async (isComposing: boolean): Promise<void> => {
-          await input.focus();
+          await focusTerminalInput(page, input);
           await input.evaluate((node, composing) => {
             const mac = /Mac|iPhone|iPad|iPod/i.test(navigator.platform || navigator.userAgent);
             node.dispatchEvent(new KeyboardEvent("keydown", {
@@ -437,7 +438,7 @@ try {
         await settled(page);
         assert.equal(await palette.count(), 0, "the composing equivalent does not open the command palette");
         assert.deepEqual(errors, []);
-        console.log("PASS restoring defaults keeps Ctrl+C visible; shortcut hints update, disable and reset; physical non-Latin Mod+Shift+K opens the palette without terminal input, but composition does not");
+        console.log("PASS restoring defaults keeps Escape visible; shortcut hints update, disable and reset; physical non-Latin Mod+Shift+K opens the palette without terminal input, but composition does not");
 
         // The frames above go to an agent pane, which the demo never types into. Its shell must
         // answer a chord as a terminal would: the demo has no herdr to turn the names into keys.
@@ -465,7 +466,7 @@ try {
           if (now !== replayed || now.trim() === "") { replayed = now; replayedSince = Date.now(); }
           await Bun.sleep(50);
         }
-        await shell.locator(".xterm-helper-textarea").focus();
+        await focusTerminalInput(shell, shell.locator(".xterm-helper-textarea"));
         await shell.keyboard.insertText("ls");
         await shows("$ ls");
         await shellBar.locator('[data-key="Shift"]').tap();

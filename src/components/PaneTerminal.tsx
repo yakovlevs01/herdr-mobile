@@ -66,6 +66,7 @@ import { terminalLabel } from "../lib/terminalLabel.ts";
 import { useMediaQuery } from "../lib/useMediaQuery.ts";
 import { useAnnouncedText } from "../lib/useAnnouncedText.ts";
 import { modalOpen } from "../lib/focus.ts";
+import { TerminalTouch, terminalCell } from "../lib/terminalTouch.ts";
 import { pinchFontSize } from "../lib/pinchFontSize.ts";
 import { narrowPaneFontSize } from "../lib/narrowPaneFont.ts";
 import { finalStep, HERDR_MOUSE_SCROLL_LINES, wheelSteps } from "../lib/wheelSteps.ts";
@@ -398,12 +399,16 @@ export function PaneTerminal({
   const [secret, setSecret] = useState<{ pane: string; prompt: string } | null>(null);
   const secretRef = useRef<string | null>(null);
   const secretActive = secret !== null && secret.pane === paneId;
-  // a touch screen writes in the terminal's input line; typing straight into the grid is chosen
+  // On touch screens the keyboard is explicitly opened, independently of TUI mouse input.
   const coarse = useMediaQuery("(pointer: coarse)");
   // A touch screen reads a pane before it answers: picking a pane or a lens there never raises the
-  // keyboard by itself, only a tap on the message box or the grid does. A desktop has no keyboard
+  // keyboard by itself. The keyboard button opens terminal input. A desktop has no keyboard
   // to raise, and the pane it picks takes the typing at once.
   const coarseRef = useRef(coarse); coarseRef.current = coarse;
+  const [keyboardOwner, setKeyboardOwner] = useState<string | null>(null);
+  const keyboardOpen = keyboardOwner === paneId && paneId !== null && active && presented && shown && !chatView;
+  const keyboardOpenRef = useRef(keyboardOpen);
+  keyboardOpenRef.current = keyboardOpen;
   const { settings, update: updateSettings } = useSettings();
   const availableModifiers = settings.keyBarItems.reduce((mask, item) => item.type === "modifier"
     ? mask | { ctrl: 4, alt: 2, shift: 1 }[item.modifier] : mask, 0);
@@ -1900,11 +1905,13 @@ export function PaneTerminal({
     // Observers pan the adopted grid locally. Interactive mirrors scroll herdr's history
     // through the API instead: there is no attach stream to carry mouse reports.
     // Two fingers pinch the font size: the font follows them locally, and the shared pty resizes once when one lifts.
+    const stroke = new TerminalTouch();
     let touchX = 0;
     let touchY = 0;
     /** finger travel of this gesture not yet sent as a wheel report */
     let touchPixels = 0;
     let tracking = false;
+    let touchPane: string | null = null;
     let pinch: { first: number; second: number; startSize: number; startDistance: number; size: number } | null = null;
     // from a second finger until every finger lifts: the stroke is a pinch, never a scroll
     let pinchStroke = false;
@@ -1957,6 +1964,10 @@ export function PaneTerminal({
     };
     const onTouchStart = (event: TouchEvent): void => {
       if (chatViewRef.current) return;
+      if (event.touches.length === 1 || (!tracking && !pinchStroke)) touchPane = paneRef.current;
+      // Own the gesture before xterm: no implicit focus, browser click or selection on release.
+      event.preventDefault();
+      event.stopPropagation();
       if (event.touches.length === 1 && pinchStroke) {
         finishPinch(false);
         pinchStroke = false;
@@ -1969,6 +1980,7 @@ export function PaneTerminal({
         if (pinchStatusFrame !== null) cancelAnimationFrame(pinchStatusFrame);
         pinchStatusFrame = null;
         tracking = false;
+        stroke.cancel();
         pinchStroke = true;
         claimPinch(event);
         const a = event.touches[0];
@@ -1990,11 +2002,21 @@ export function PaneTerminal({
       if (tracking && first) {
         touchX = first.clientX;
         touchY = first.clientY;
+        stroke.begin(touchX, touchY, paneRef.current);
       }
     };
     const onTouchMove = (event: TouchEvent): void => {
+      if (chatViewRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (touchPane !== paneRef.current || !activeRef.current || !presentedRef.current || !shownRef.current) {
+        stroke.cancel();
+        tracking = false;
+        return;
+      }
       if (!pinchStroke && event.touches.length > 1) {
         tracking = false;
+        stroke.cancel();
         pinchStroke = true;
       }
       if (pinchStroke) {
@@ -2023,10 +2045,11 @@ export function PaneTerminal({
       const first = event.touches[0];
       if (!first) return;
       // finger moving down (y > touchY) shows older lines: a wheel scrolling up, negative deltaY
-      const delta = touchY - first.clientY;
-      const across = touchX - first.clientX;
-      touchX = first.clientX;
-      touchY = first.clientY;
+      const travel = stroke.move(first.clientX, first.clientY);
+      if (!travel) return;
+      const { delta, across } = travel;
+      // Keep wheel coordinates at the stroke's origin: crossing a TUI panel boundary
+      // midway through a swipe must not scroll a different panel.
       if (adopted() && (!scrollableMirror() || canPanTerminalGrid(host, delta))) {
         // the pan owns the swipe now: history travel left from before it is not sent at the lift
         touchPixels = 0;
@@ -2058,6 +2081,31 @@ export function PaneTerminal({
       }
     };
     const onTouchEnd = (event: TouchEvent): void => {
+      if (chatViewRef.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (touchPane !== paneRef.current || !activeRef.current || !presentedRef.current || !shownRef.current) {
+        stroke.cancel();
+        tracking = false;
+        touchPixels = 0;
+        finishPinch(false);
+        pinchStroke = false;
+        return;
+      }
+      const last = event.changedTouches[0];
+      if (last) stroke.move(last.clientX, last.clientY);
+      const tap = tracking && !pinchStroke && event.type === "touchend" ? stroke.tap(paneRef.current) : null;
+      if (tap && !adopted() && activeRef.current && presentedRef.current && shownRef.current
+        && !heldRef.current && !endedRef.current && !secretRef.current && term.modes.mouseTrackingMode !== "none") {
+        const screen = term.element?.querySelector(".xterm-screen");
+        const cell = screen && terminalCell(tap.x, tap.y, screen.getBoundingClientRect(), term.cols, term.rows);
+        const current = paneRef.current;
+        if (cell && current) {
+          // A click is one ordered press/release, never a draft or a retried action.
+          socket.sendInput(current, `\x1b[<0;${cell.col};${cell.row}M\x1b[<0;${cell.col};${cell.row}m`);
+        }
+      }
+      stroke.cancel();
       // a lifted one-finger drag sends what is left once it reaches half a step: a flick shorter
       // than one step still scrolls, and a long drag loses at most half a step at its end
       if (tracking && event.type === "touchend" && !pinchStroke && (!adopted() || scrollableMirror())) {
@@ -2639,7 +2687,7 @@ export function PaneTerminal({
     barKeyRef.current = { key: item.key, chord };
     try { term.input(input); } finally { barKeyRef.current = null; }
     // with the input line, the keyboard belongs to it: a key tap must not move it to the grid
-    if (!inputLineRef.current) term.focus();
+    if (!inputLineRef.current && !coarseRef.current) term.focus();
   }, []);
 
   const toggleModifier = useCallback((modifier: keyof StickyModifiers) => {
@@ -2647,7 +2695,7 @@ export function PaneTerminal({
     const next = { ...modifiersRef.current, [modifier]: !modifiersRef.current[modifier] };
     modifiersRef.current = next;
     setModifiers(next);
-    if (!inputLineRef.current) termRef.current?.focus();
+    if (!inputLineRef.current && !coarseRef.current) termRef.current?.focus();
   }, []);
 
 
@@ -2783,28 +2831,42 @@ export function PaneTerminal({
     return sent;
   }, []);
 
-  const toggleDirect = useCallback(() => {
+  const toggleKeyboard = useCallback(() => {
     if (composingRef.current || lineComposingRef.current) return;
-    updateSettings({ terminalInputMode: directTyping ? "line" : "direct" });
-  }, [directTyping, updateSettings]);
+    const open = !keyboardOpenRef.current;
+    keyboardOpenRef.current = open;
+    setKeyboardOwner(open ? paneId : null);
+    const field = inputLineRef.current
+      ? stackRef.current?.querySelector<HTMLTextAreaElement>(".terminal-input-text")
+      : termRef.current?.textarea;
+    if (!field) return;
+    field.readOnly = !open;
+    field.inputMode = open ? "text" : "none";
+    // Safari requires focus in the original user gesture, not a later React effect.
+    if (open) field.focus({ preventScroll: true });
+    else field.blur();
+  }, [paneId]);
 
-  // the input line keeps a tapped grid from raising the keyboard; typing straight into it gives it
-  // back. Only turning direct typing on raises it: a pane or lens picked with it on does not.
-  const directTypingRef = useRef(directTyping);
-  useEffect(() => {
-    const turnedOn = directTyping && !directTypingRef.current;
-    directTypingRef.current = directTyping;
-    const textarea = hostRef.current?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
-    if (!textarea) return;
-    if (inputLine) {
-      textarea.setAttribute("inputmode", "none");
-      if (document.activeElement === textarea) textarea.blur();
-    } else {
-      textarea.removeAttribute("inputmode");
-      // only the selected pane: a focused sibling would take the selection (PaneCanvas onFocusCapture)
-      if (activeRef.current && coarse && !chatView && turnedOn) termRef.current?.focus();
+  useLayoutEffect(() => { setKeyboardOwner(null); }, [paneId]);
+
+  useLayoutEffect(() => {
+    if (!active || !presented || !shown || chatView) setKeyboardOwner(null);
+  }, [active, presented, shown, chatView, paneId]);
+
+  useLayoutEffect(() => {
+    const fields = [terminal?.textarea, stackRef.current?.querySelector<HTMLTextAreaElement>(".terminal-input-text")].filter((field): field is HTMLTextAreaElement => !!field);
+    const locked = coarse && !keyboardOpen;
+    const guardFocus = (event: FocusEvent) => {
+      if (coarseRef.current && !keyboardOpenRef.current) (event.target as HTMLTextAreaElement).blur();
+    };
+    for (const field of fields) {
+      field.readOnly = locked;
+      field.inputMode = locked || (field === terminal?.textarea && inputLine) ? "none" : "text";
+      if (locked && document.activeElement === field) field.blur();
+      field.addEventListener("focus", guardFocus);
     }
-  }, [inputLine, coarse, chatView, directTyping, paneId]);
+    return () => { for (const field of fields) field.removeEventListener("focus", guardFocus); };
+  }, [terminal, coarse, keyboardOpen, inputLine]);
 
   // the composer's stop button: Escape interrupts the agent's current turn in every
   // supported TUI (Claude Code, omp, codex) without killing the process the way ^C would
@@ -3155,8 +3217,16 @@ export function PaneTerminal({
         const secret = stack?.querySelector<HTMLInputElement>(".secret-input input");
         if (secret) { secret.focus({ preventScroll: true }); return; }
         const input = stack?.querySelector<HTMLTextAreaElement>(chatViewRef.current ? ".composer-text" : ".terminal-input-text");
-        if (input) input.focus({ preventScroll: true });
-        else if (!chatViewRef.current && !heldRef.current && !endedRef.current) termRef.current?.focus();
+        const field = input ?? (!chatViewRef.current && !heldRef.current && !endedRef.current ? termRef.current?.textarea : null);
+        if (field) {
+          if (coarseRef.current && !chatViewRef.current) {
+            keyboardOpenRef.current = true;
+            setKeyboardOwner(paneRef.current);
+            field.readOnly = false;
+            field.inputMode = "text";
+          }
+          field.focus({ preventScroll: true });
+        }
       },
       scrollPage: (direction) => {
         if (activeRef.current && presentedRef.current && !modalOpen()) pageScroll.current?.(direction);
@@ -3554,7 +3624,7 @@ export function PaneTerminal({
       {presented && paneId !== null && !secretActive && !observing && !chatView && <KeyBar disabled={composing || !connected || !inputReady || held || ended} onKey={pressKey}
         holdScope={`${paneStorageId(machineId, paneId)}:${view}`}
         modifiers={modifiers} onToggleModifier={toggleModifier} items={settings.keyBarItems}
-        {...(coarse ? { directTyping, onToggleDirect: toggleDirect, directDisabled: lineComposing } : {})} />}
+        {...(coarse ? { keyboardOpen, onToggleKeyboard: toggleKeyboard, directDisabled: lineComposing } : {})} />}
     </div>
   );
 }

@@ -115,7 +115,7 @@ try {
         await page.goto(`http://127.0.0.1:${server.port}/herdr-web-ui/demo/app/?pane=${encodeURIComponent(panes.api)}`);
         await page.locator(".conn-live").waitFor({ state: "attached" });
         await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.key-bar .key[data-key="ArrowLeft"]')?.disabled === false, undefined, { timeout: 5_000 });
-        await page.locator(".xterm-helper-textarea").focus();
+        await page.getByRole("button", { name: "Show keyboard", exact: true }).tap();
         const bar = page.locator(".key-bar");
         const left = bar.locator('.key[data-key="ArrowLeft"]');
         const escape = bar.locator('.key[data-key="Escape"]');
@@ -259,7 +259,7 @@ try {
         await page.locator(".conn-live").waitFor({ state: "attached" });
         await page.waitForFunction(() => document.querySelector<HTMLButtonElement>('.key-bar .key[data-key="ArrowLeft"]')?.disabled === false, undefined, { timeout: 5_000 });
         const helper = page.locator(".pane-frame.is-current .xterm-helper-textarea");
-        await helper.focus();
+        await page.getByRole("button", { name: "Show keyboard", exact: true }).tap();
         const field = () => helper.evaluate((element: HTMLTextAreaElement) => ({ value: element.value, caret: element.selectionStart, wrap: getComputedStyle(element).whiteSpace }));
         assert.deepEqual(await field(), { value: " ", caret: 1, wrap: "pre-wrap" }, "focus leaves one space before the caret in a wrapping field");
         const before = (await framesOf(page)).length;
