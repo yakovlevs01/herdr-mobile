@@ -1,3 +1,4 @@
+import { focusTerminalInput } from "./mobile-terminal-controls.ts";
 /** Input lifecycle adversarial cases, using an owned pane and intercepted submits. */
 import assert from "node:assert/strict";
 import type { Browser } from "playwright-core";
@@ -629,6 +630,7 @@ async function checkKeyBarWhileLineComposes(browser: Browser, origin: string, pa
     const interrupt = page.locator('.key-bar [data-key="ctrl-c"]');
     await line.waitFor();
     await until(async () => !(await esc.isDisabled()), "key bar ready");
+    await focusTerminalInput(page, line);
     await line.fill("fix the");
     await line.dispatchEvent("compositionstart", { data: "" });
     await line.dispatchEvent("compositionupdate", { data: "the" });
@@ -644,19 +646,19 @@ async function checkKeyBarWhileLineComposes(browser: Browser, origin: string, pa
     await until(() => frames.length > before + 1, "^C frame");
     assert.deepEqual(frames.slice(before).map((frame) => [frame.type, frame.text ?? frame.keys]), [["input", "\x1b"], ["input", "\x03"]]);
     assert.equal(await line.inputValue(), "fix the", "the composing line keeps its text");
-    // the switch to direct typing would unmount the line mid-composition: it waits
-    const direct = page.locator('.key-bar [data-key="direct"]');
-    assert.equal(await direct.isDisabled(), true, "the direct-typing toggle waits for the line's composition");
+    // Closing the keyboard would interrupt the line's composition: it waits.
+    const direct = page.locator('[data-key="keyboard"]');
+    assert.equal(await direct.isDisabled(), true, "the keyboard toggle waits for the line's composition");
     const sent = frames.length;
     await direct.tap({ force: true });
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     assert.equal(await line.isVisible(), true, "the input line stays while it composes");
-    assert.equal(await line.inputValue(), "fix the", "the composing line keeps its text after the direct tap");
-    assert.equal(frames.length, sent, "nothing reaches the pane from the direct tap");
+    assert.equal(await line.inputValue(), "fix the", "the composing line keeps its text after the keyboard tap");
+    assert.equal(frames.length, sent, "nothing reaches the pane from the keyboard tap");
     await line.dispatchEvent("compositionend", { data: "the" });
-    await until(async () => !(await direct.isDisabled()), "direct toggle live after the composition");
+    await until(async () => !(await direct.isDisabled()), "keyboard toggle live after the composition");
     assert.deepEqual(errors, []);
-    console.log("PASS key bar while the input line composes: Esc and ^C sent, direct toggle waits, line text kept");
+    console.log("PASS key bar while the input line composes: Esc and ^C sent, keyboard toggle waits, line text kept");
   } finally { await context.close(); }
 }
 

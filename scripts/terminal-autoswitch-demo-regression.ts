@@ -1,3 +1,4 @@
+import { setTerminalInputMode } from "./mobile-terminal-controls.ts";
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -494,8 +495,7 @@ try {
         // back would unmount the line mid-word
         await send(page, "/config");
         await expectPeek(true, "/config");
-        const direct = stack(page).locator('.key-bar .key[data-key="direct"]');
-        await direct.click();
+        await setTerminalInputMode(page, "line");
         const line = stack(page).locator(".terminal-input textarea");
         await line.waitFor();
         await line.dispatchEvent("compositionstart", { data: "" });
@@ -503,7 +503,7 @@ try {
         await hint(page).getByText(AUTO_NOTE, { exact: true }).waitFor({ state: "detached" });
         assert.equal(await peek(page).count(), 1, "a composition in the input line keeps the peek");
         await line.dispatchEvent("compositionend", { data: "" });
-        await direct.click();
+        await setTerminalInputMode(page, "direct");
         await line.waitFor({ state: "detached" });
         await hint(page).getByRole("button", { name: "Back to Chat", exact: true }).click();
         await expectReturned();

@@ -1,3 +1,4 @@
+import { focusTerminalInput, setTerminalInputMode } from "./mobile-terminal-controls.ts";
 /** Real-browser regressions against owned herdr panes. Run after `bun run build`. */
 import "./test-herdr.ts"; // a herdr session of its own: nothing shows in the user's
 import assert from "node:assert/strict";
@@ -2229,6 +2230,7 @@ try {
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).blur();
   await mobilePage.locator('button[aria-controls="workspace-drawer"]').click();
   await mobilePage.locator(`.pane-select[title^="${paneA} —"]`).click();
+  await mobilePage.getByTitle("Chat transcript (⌘⇧J)", { exact: true }).click();
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).waitFor();
   await mobilePage.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await mobilePage.waitForTimeout(NO_SEND_WAIT_MS);
@@ -2243,6 +2245,7 @@ try {
   await mobilePage.locator('button[aria-controls="workspace-drawer"]').click();
   assert.equal(await mobilePage.locator(".agents-sidebar .agent-section-toggle").getAttribute("aria-expanded"), "false", "a phone's drawer opens with Agents folded");
   await mobilePage.locator(`.pane-select[title^="${paneB} —"]`).click();
+  await mobilePage.getByTitle("Chat transcript (⌘⇧J)", { exact: true }).click();
   await mobilePage.getByRole("textbox", { name: "Message", exact: true }).waitFor();
   console.log("PASS a pane picked on a phone waits for a tap before raising the keyboard");
 
@@ -2265,7 +2268,7 @@ try {
   await until(async () => await mobileComposer.getAttribute("placeholder") === "run the tests", "a phone shows the suggestion as the placeholder");
   assert.equal(await mobilePage.locator(".voice-mic").count(), 0, "a phone's chat has no mic until Settings asks for it");
   assert.equal(await mobilePage.getByTitle("Use the suggestion", { exact: true }).count(), 0, "a phone shows no suggestion chip by default");
-  await mobilePage.goto(`${origin}/?pane=${encodeURIComponent(paneB)}&settings=chat&section=composer`);
+  await mobilePage.goto(`${origin}/?pane=${encodeURIComponent(paneB)}&view=chat&settings=chat&section=composer`);
   await mobilePage.getByRole("switch", { name: "Suggestion chip", exact: true }).setChecked(true);
   await mobilePage.getByRole("button", { name: "Close settings", exact: true }).click();
   await mobileComposer.fill("");
@@ -2300,14 +2303,15 @@ try {
   await touchPage.locator("[data-direct-typing]").waitFor();
   assert.equal(await touchPage.locator(".terminal-input").count(), 0, "a phone starts in direct typing");
   assert.equal(await touchPage.evaluate(() => document.activeElement?.classList.contains("xterm-helper-textarea") ?? false), false,
-    "opening the terminal on a phone does not focus the grid, so the keyboard stays down until a tap");
-  // the keyboard key is the input line's switch: lit while the line is shown, unlit in direct typing
-  const lineKey = touchPage.getByRole("button", { name: "Input line", exact: true });
-  assert.equal(await lineKey.getAttribute("aria-pressed"), "false", "direct typing leaves the input-line key unlit");
-  await lineKey.click();
+    "opening the terminal on a phone does not focus the grid, so the keyboard stays down until explicitly opened");
+  // The keyboard key controls focus; the input mode remains a Settings choice.
+  const lineKey = touchPage.locator('[data-key="keyboard"]');
+  assert.equal(await lineKey.getAttribute("aria-pressed"), "false", "a closed keyboard leaves its key unlit");
+  await setTerminalInputMode(touchPage, "line");
+  await lineKey.tap();
   const line = touchPage.getByRole("textbox", { name: "Terminal input line", exact: true });
   await line.waitFor();
-  assert.equal(await lineKey.getAttribute("aria-pressed"), "true", "the shown input line lights its key");
+  assert.equal(await lineKey.getAttribute("aria-pressed"), "true", "the opened keyboard lights its key");
   assert.equal(await touchPage.locator(".xterm-helper-textarea").getAttribute("inputmode"), "none");
   await line.fill("printf 'line-ok\\n'");
   await line.press("Enter");
@@ -2336,16 +2340,17 @@ try {
   await touchPage.getByRole("button", { name: "Press Enter in the terminal", exact: true }).click();
   await until(() => touchSent.length > enters && touchSent.at(-1)?.type === "input" && touchSent.at(-1)?.text === "\r", "enter from the empty line");
   await line.fill("unsent 한글 😀");
-  // typing straight into the grid is one tap away, and gives the keyboard back to it
-  await touchPage.getByRole("button", { name: "Input line", exact: true }).click();
+  // Switching the input mode in Settings keeps the unsent line.
+  await setTerminalInputMode(touchPage, "direct");
   assert.equal(await touchPage.locator(".terminal-input").count(), 0);
-  assert.equal(await touchPage.locator(".xterm-helper-textarea").getAttribute("inputmode"), null);
-  await touchPage.getByRole("button", { name: "Input line", exact: true }).click();
+  assert.equal(await touchPage.locator(".xterm-helper-textarea").getAttribute("inputmode"), "text");
+  await setTerminalInputMode(touchPage, "line");
   await line.waitFor();
   assert.equal(await line.inputValue(), "unsent 한글 😀", "mode switches preserve the unsent line");
   await touchPage.reload();
   await line.waitFor();
   assert.equal(await line.inputValue(), "unsent 한글 😀", "reload preserves the unsent line");
+  await focusTerminalInput(touchPage, line);
   await line.fill("");
   assert.equal(await touchPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   assert.equal(errors.length, 0, errors.join("\n"));

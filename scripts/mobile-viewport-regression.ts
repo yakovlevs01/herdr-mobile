@@ -1,3 +1,4 @@
+import { focusTerminalInput, setTerminalInputMode } from "./mobile-terminal-controls.ts";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -124,21 +125,22 @@ export async function checkMobileViewport(browser: Browser, origin: string, pane
     const terminal = page.locator(".xterm-helper-textarea");
     await terminal.focus();
     await shell(false, "", 844);
-    const direct = page.getByRole("button", { name: "Input line", exact: true });
-    await direct.click();
+    await setTerminalInputMode(page, "direct");
+    await focusTerminalInput(page, terminal);
     await page.locator("[data-direct-typing]").waitFor();
     await shell(true, "500px", 500);
     if (process.env.UI_EVIDENCE_DIR) {
       mkdirSync(process.env.UI_EVIDENCE_DIR, { recursive: true });
       await page.screenshot({ path: join(process.env.UI_EVIDENCE_DIR, "viewport-direct-typing.png") });
     }
-    await direct.click();
+    await setTerminalInputMode(page, "line");
+    await page.getByRole("button", { name: "Hide keyboard", exact: true }).tap();
     await shell(true, "500px", 500);
     await height(795);
     await shell(false, "", 844);
     await height(500);
     await shell(false, "", 844);
-    await page.getByRole("textbox", { name: "Terminal input line", exact: true }).focus();
+    await focusTerminalInput(page, page.getByRole("textbox", { name: "Terminal input line", exact: true }));
     await shell(true, "500px", 500);
     await blur();
     await shell(true, "500px", 500);

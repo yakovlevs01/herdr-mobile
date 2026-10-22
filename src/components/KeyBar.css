@@ -31,6 +31,27 @@
   display: none;
 }
 
+/* The keyboard switch stays reachable while the service keys scroll sideways. */
+.terminal-touch-controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  min-width: 0;
+  border-top: var(--hairline) solid var(--border);
+  background: var(--bg-panel);
+}
+
+.terminal-touch-controls .key-bar {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  border-top: 0;
+}
+
+.terminal-touch-controls .terminal-keyboard {
+  margin-left: var(--space-2);
+}
+
 /* a mask rather than a painted overlay: the fade is the bar's own colours in every palette, it
    needs no element over the scroller, and it is static, so reduced motion has nothing to stop */
 .key-bar[data-overflow-start],

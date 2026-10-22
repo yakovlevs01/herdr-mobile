@@ -58,10 +58,11 @@ export function migrateKeyBarItems(extras: readonly KeyBarExtra[]): KeyBarItem[]
 }
 
 export const DEFAULT_KEY_BAR_ITEMS: KeyBarItem[] = [
-  { type: "key", key: "Escape" }, { type: "key", key: "Tab" }, { type: "key", key: "ctrl-c" },
-  { type: "modifier", modifier: "ctrl" }, { type: "modifier", modifier: "alt" }, { type: "modifier", modifier: "shift" },
-  { type: "key", key: "Enter" },
+  { type: "key", key: "Escape" }, { type: "key", key: "Tab" },
   { type: "key", key: "ArrowUp" }, { type: "key", key: "ArrowDown" }, { type: "key", key: "ArrowLeft" }, { type: "key", key: "ArrowRight" },
+  { type: "key", key: "Enter" },
+  { type: "modifier", modifier: "ctrl" }, { type: "modifier", modifier: "alt" }, { type: "modifier", modifier: "shift" },
+  { type: "key", key: "ctrl-c" },
 ];
 
 /** Stable descriptor identity; an inherited key and an exact bare key have different behavior. */

@@ -21,6 +21,8 @@ export interface KeyBarProps {
   items: readonly KeyBarItem[];
   /** on a touch screen: whether the keyboard types straight into the terminal (else the input line) */
   directTyping?: boolean;
+  keyboardOpen?: boolean;
+  onToggleKeyboard?: () => void;
   onToggleDirect?: () => void;
   /** greys out only the direct-typing toggle (an input-line composition is in progress) */
   directDisabled?: boolean;
@@ -35,6 +37,7 @@ function keepFocus(event: PointerEvent<HTMLButtonElement> | MouseEvent<HTMLButto
 }
 
 interface KeyProps {
+  className?: string;
   disabled?: boolean;
   dataKey: string;
   label?: string;
@@ -45,12 +48,12 @@ interface KeyProps {
   children: ReactNode;
 }
 
-function Key({ dataKey, label, pressed, onPress, children, disabled, repeatable, holdScope }: KeyProps) {
+function Key({ className, dataKey, label, pressed, onPress, children, disabled, repeatable, holdScope }: KeyProps) {
   const onPressRef = useRef(onPress);
   onPressRef.current = onPress;
   const disabledRef = useRef(disabled);
   disabledRef.current = disabled;
-  const pointerRef = useRef({ id: null as number | null, pendingClick: false, cancelClick: false });
+  const pointerRef = useRef({ id: null as number | null, pendingClick: false, cancelClick: false, x: 0, y: 0 });
   const repeatRef = useRef<KeyRepeat | null>(null);
   if (repeatable && repeatRef.current === null) {
     repeatRef.current = createKeyRepeat(() => {
@@ -66,7 +69,7 @@ function Key({ dataKey, label, pressed, onPress, children, disabled, repeatable,
   }, []);
 
   useLayoutEffect(() => {
-    if (!repeatable || disabled) {
+    if (disabled) {
       cancelHold();
       return;
     }
@@ -89,37 +92,57 @@ function Key({ dataKey, label, pressed, onPress, children, disabled, repeatable,
     <button
       type="button"
       disabled={disabled}
-      className={`key${pressed ? " is-armed" : ""}`}
+      className={`key${pressed ? " is-armed" : ""}${className ? ` ${className}` : ""}`}
       data-key={dataKey}
       aria-label={label}
       aria-pressed={pressed}
       tabIndex={-1}
       onPointerDown={(event) => {
         keepFocus(event);
-        if (!repeatable || disabled || event.button !== 0 || !event.isPrimary || pointerRef.current.id !== null) return;
+        if (disabled || event.button !== 0 || !event.isPrimary || pointerRef.current.id !== null) return;
+        pointerRef.current.cancelClick = false;
+        if (!repeatable && event.pointerType !== "touch") return;
         const pointer = pointerRef.current;
         pointer.id = event.pointerId;
         pointer.pendingClick = true;
         pointer.cancelClick = false;
+        pointer.x = event.clientX;
+        pointer.y = event.clientY;
         repeatRef.current?.press(event.clientX, event.clientY);
         // Capture keeps release/move visible outside the key; browser panning can still cancel it.
         try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
       }}
-      onPointerMove={repeatable ? (event) => {
+      onPointerMove={(event) => {
         if (pointerRef.current.id !== event.pointerId) return;
-        if (repeatRef.current?.move(event.clientX, event.clientY)) pointerRef.current.cancelClick = true;
-      } : undefined}
-      onPointerUp={repeatable ? (event) => {
+        const pointer = pointerRef.current;
+        if (repeatable ? repeatRef.current?.move(event.clientX, event.clientY)
+          : Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 10) pointer.cancelClick = true;
+      }}
+      onPointerUp={(event) => {
         if (pointerRef.current.id !== event.pointerId) return;
         repeatRef.current?.release();
         // Ignore the lost capture that follows release, preserving the click gate.
         pointerRef.current.id = null;
-      } : undefined}
-      onPointerCancel={repeatable ? cancelPointer : undefined}
-      onLostPointerCapture={repeatable ? cancelPointer : undefined}
+        if (event.pointerType === "touch") {
+          // WebKit can omit click after preventDefault(pointerdown). Deliver at touch
+          // release, and suppress Chromium's subsequent compatibility click exactly once.
+          const allowed = repeatRef.current?.takeClick() ?? true;
+          const cancelled = pointerRef.current.cancelClick;
+          pointerRef.current.pendingClick = false;
+          pointerRef.current.cancelClick = true;
+          if (allowed && !cancelled && !disabled) onPressRef.current();
+        }
+      }}
+      onPointerCancel={cancelPointer}
+      onLostPointerCapture={cancelPointer}
       onMouseDown={keepFocus}
       onContextMenu={keepFocus}
-      onClick={() => {
+      onClick={(event) => {
+        if (pointerRef.current.cancelClick && event.detail !== 0) {
+          pointerRef.current.cancelClick = false;
+          pointerRef.current.pendingClick = false;
+          return;
+        }
         if (!repeatable) {
           onPress();
           return;
@@ -187,7 +210,7 @@ export const KEY_SPOKEN_NAMES: ReadonlyArray<{ key: string; label: string }> = [
  * for touch, a hardware keyboard already has all of them. Hence role="group", not
  * toolbar: a toolbar promises arrow-key navigation between items, which these skip.
  */
-export function KeyBar({ onKey, modifiers, onToggleModifier, items, directTyping, onToggleDirect, directDisabled, disabled, holdScope }: KeyBarProps) {
+export function KeyBar({ onKey, modifiers, onToggleModifier, items, directTyping, onToggleDirect, keyboardOpen, onToggleKeyboard, directDisabled, disabled, holdScope }: KeyBarProps) {
   const t = useT();
   // only a bar that reaches the bottom of the screen keeps clear of the home indicator: a pane
   // stacked over another one has the other pane under its bar, not the indicator
@@ -240,6 +263,12 @@ export function KeyBar({ onKey, modifiers, onToggleModifier, items, directTyping
     return spoken === undefined ? keyBarItemLabel({ type: "key", key: item.key }) : t(spoken);
   };
   return (
+    <div className={onToggleKeyboard ? "terminal-touch-controls" : undefined}>
+      {onToggleKeyboard && <Key className="terminal-keyboard"
+        dataKey="keyboard" label={t(keyboardOpen ? "Hide keyboard" : "Show keyboard")} pressed={keyboardOpen}
+        disabled={(disabled && !keyboardOpen) || directDisabled} onPress={onToggleKeyboard}>
+        <Keyboard aria-hidden="true" />
+      </Key>}
     <div className="key-bar" ref={barRef} role="group" aria-label={t("Terminal keys")}>
       {/* first: on a narrow cover screen the row scrolls, and the mode toggle must not be the key cut off */}
       {onToggleDirect && (
@@ -266,6 +295,7 @@ export function KeyBar({ onKey, modifiers, onToggleModifier, items, directTyping
           {arrow && item.modifiers === undefined ? <Chevron direction={arrow.direction} /> : keyBarItemLabel(item)}
         </Key>;
       })}
+    </div>
     </div>
   );
 }
