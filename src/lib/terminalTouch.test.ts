@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { TerminalTouch, terminalCell } from "./terminalTouch.ts";
+import { TerminalTouch, TerminalTouchMomentum, terminalCell } from "./terminalTouch.ts";
 
 describe("terminal touch routing", () => {
   it("tolerates resting jitter, but never turns a completed drag back into a tap", () => {
@@ -25,5 +25,36 @@ describe("terminal touch routing", () => {
     expect(terminalCell(387, 649, rect, 40, 30)).toEqual({ col: 40, row: 30 });
     expect(terminalCell(388, 650, rect, 40, 30)).toBeNull();
     expect(terminalCell(7, 50, rect, 40, 30)).toBeNull();
+  });
+});
+
+
+describe("terminal touch momentum", () => {
+  it("coasts in the flick direction, decays and stops within one second", () => {
+    const motion = new TerminalTouchMomentum();
+    motion.begin(0);
+    motion.move(-50, 40);
+    motion.move(-50, 80);
+    expect(motion.release(85)).toBe(true);
+    const first = motion.advance(101);
+    expect(first).toBeLessThan(0);
+    expect(Math.abs(motion.advance(117))).toBeLessThan(Math.abs(first));
+    let distance = first;
+    for (let time = 133; time < 1100; time += 16) distance += motion.advance(time);
+    expect(distance).toBeGreaterThan(-600);
+    expect(motion.advance(1100)).toBe(0);
+  });
+  it("does not coast after a pause, a cancellation or a suspended frame", () => {
+    const motion = new TerminalTouchMomentum();
+    motion.begin(0);
+    motion.move(60, 40);
+    expect(motion.release(150)).toBe(false);
+    motion.begin(200);
+    motion.move(60, 240);
+    expect(motion.release(245)).toBe(true);
+    expect(motion.advance(400)).toBe(0);
+    motion.reset();
+    expect(motion.release(410)).toBe(false);
+    expect(motion.advance(426)).toBe(0);
   });
 });

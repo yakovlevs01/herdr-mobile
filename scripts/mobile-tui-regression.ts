@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import { chromium, webkit, devices } from "playwright-core";
 import { createServer } from "../server/index.ts";
 import { workspaceCreate, workspaceClose, paneSendText, paneSendKeys, paneRead, herdrRpc } from "../server/herdr/client.ts";
+import { setTerminalInputMode } from "./mobile-terminal-controls.ts";
 import { chromePath } from "./chrome-path.ts";
 
 const root = mkdtempSync(join(tmpdir(), "herdr-mobile-tui-"));
@@ -95,6 +96,8 @@ try {
   await touch("touchStart", [{ x, y, id: 1 }]);
   for (let i = 1; i <= 10; i++) await touch("touchMove", [{ x: x + i * 12, y: y + i * 12, id: 1 }]);
   await touch("touchEnd", []);
+  const atRelease = raw().length;
+  await until(() => raw().length > atRelease, "flick coasts after finger release");
   await until(() => /\x1b\[<6[45];/.test(fresh()), "swipe reaches PTY as wheel reports");
   await quiet();
   assert.doesNotMatch(fresh(), /\x1b\[<0;/, "a diagonal swipe never clicks");
@@ -102,6 +105,14 @@ try {
   assert(wheelCells.length > 1, "scroll sends several steps");
   assert.equal(new Set(wheelCells).size, 1, "the original TUI panel owns the entire swipe");
   assert.equal(await focused(), false, "scroll keeps keyboard closed");
+
+  // A flick keeps moving after release; touching again cancels that inertia.
+  await touch("touchStart", [{ x, y, id: 1 }]);
+  await touch("touchCancel", []);
+  await quiet(); // fixed wait: allow already sent bytes to drain before checking the stop.
+  clear();
+  await quiet();
+  assert.equal(fresh(), "", "new touch stops momentum");
 
   clear();
   await touch("touchStart", [{ x, y, id: 1 }]);
@@ -122,6 +133,21 @@ try {
   await page.locator('.key[data-key="Control"]').tap();
   assert.equal(await focused(), false, "modifier does not summon keyboard");
   await page.locator('.key[data-key="Control"]').tap();
+
+  // The probe leaves its cursor on the line immediately after PROBE READY.
+  const inputRow = await page.locator(".xterm-rows > div").evaluateAll((rows) => {
+    const index = rows.findIndex((row) => row.textContent?.includes("PROBE READY"));
+    if (index < 0 || !rows[index + 1]) throw new Error("probe input row missing");
+    const rect = rows[index + 1]!.getBoundingClientRect();
+    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+  });
+  await tap(inputRow.x, inputRow.y);
+  await until(focused, "tapping the actual terminal input row opens the keyboard");
+  await page.getByRole("button", { name: "Hide keyboard", exact: true }).tap();
+  await touch("touchStart", [{ ...inputRow, id: 1 }]);
+  await touch("touchMove", [{ x: inputRow.x, y: inputRow.y + 60, id: 1 }]);
+  await touch("touchEnd", []);
+  assert.equal(await focused(), false, "swiping from the input row does not open the keyboard");
 
   await keyboard.tap();
   await until(focused, "explicit keyboard action focuses the input");
@@ -147,6 +173,10 @@ try {
   await page.reload();
   await until(() => ready, "reload restores terminal attachment");
   assert.equal(await focused(), false, "reload always starts with keyboard closed");
+  await setTerminalInputMode(page, "line");
+  const line = page.locator(".terminal-input-text");
+  await line.tap();
+  assert.equal(await line.evaluate((node) => document.activeElement === node), true, "tapping the optional input line opens it directly");
   assert.deepEqual(errors, [], "no browser errors");
   console.log("PASS iPhone TUI: tap bytes, anchored scroll, cancelled gestures, hidden-keyboard keys, Unicode input, reload, portrait/landscape");
 } finally {

@@ -4,10 +4,11 @@ This fork keeps Ovis's computer/workspace/agent sidebar and Herdr transport, and
 opens live terminals by default. It is intended for iPhone use through Tailscale
 with Linux and macOS hosts.
 
-- Tap a TUI control to click it without raising the keyboard.
+- Tap the terminal cursor row to type. Taps elsewhere click TUI controls without raising the keyboard.
 - Tap the fixed keyboard button to type, and tap it again to hide the keyboard.
 - Swipe inside a TUI region to scroll it. The region where the swipe starts owns
-  the entire stroke; releasing a swipe does not click.
+  the entire stroke; releasing a swipe does not click. Flicks coast briefly and stop on
+  the next touch or key. Reduced-motion preference disables coasting.
 - Escape, Tab, arrows and Enter are first in the default service-key row.
   Swipe the key row sideways for modifiers and Ctrl+C; the keyboard button stays.
 - Pinch still changes terminal text size. Existing custom key layouts are preserved.
